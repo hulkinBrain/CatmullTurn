@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using UnityEngine;
 
 public class CatmullRomSpline : MonoBehaviour
@@ -53,9 +54,9 @@ public class CatmullRomSpline : MonoBehaviour
         return GetControlPoints(transform.GetChild(0).position, transform.GetChild(1).position, transform.GetChild(2).position);
     }
 
-    List<Pose> BeforeSectionPoints(List<Vector3> controlPoints, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split)
+    List<Pose> BeforeSectionPoints(List<Vector3> controlPoints, int resolution, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split)
     {
-        List<Pose> poses = new(split);
+        List<Pose> poses = new();
         float accumulatedDistance = 0;
 
         var beforeSectionControlPoints = controlPoints.GetRange(0, 4);
@@ -103,9 +104,9 @@ public class CatmullRomSpline : MonoBehaviour
         return poses;
     }
 
-    List<Pose> AfterSectionPoints(List<Vector3> controlPoints, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split)
+    List<Pose> AfterSectionPoints(List<Vector3> controlPoints, int resolution, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split, int fbCount)
     {
-        List<Pose> poses = new(split);
+        List<Pose> poses = new();
         var afterSectionControlPoints = controlPoints.GetRange(1, 4);
         float accumulatedDistance = 0;
 
@@ -131,7 +132,7 @@ public class CatmullRomSpline : MonoBehaviour
 
                     Vector3 direction = currentPoint - previousPoint;
                     Vector3 angle = Quaternion.LookRotation(direction).eulerAngles;
-                    Pose pose = new(previousPoint, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split + poses.Count))));
+                    Pose pose = new(previousPoint, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split + poses.Count - 1))));
                     poses.Add(pose);
 
                     if (poses.Count == 2)
@@ -140,7 +141,7 @@ public class CatmullRomSpline : MonoBehaviour
                         poses[^2] = new(poses[^2].position, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split - 1))));
                     }
 
-                    if (poses.Count == split)
+                    if (poses.Count == fbCount - split + 1)
                     {
                         break;
                     }
@@ -170,19 +171,24 @@ public class CatmullRomSpline : MonoBehaviour
 
         // Clamps exit angle between -endRollAngle and endRollAngle to avoid extreme roll angles for fishbones
         float clampedExitAngle = Mathf.Clamp(Vector3.SignedAngle(p1p2Vec, p2p3Vec, Vector3.up), -endRollAngle, endRollAngle);
-        
+
         // Interpolate "startRollAngle" for first fishbone from 0 to 45deg based on "clampedExitAngle"
         float interpolatedStartRollAngle = startRollAngle * (clampedExitAngle / endRollAngle);
 
         // Calculate the step increment in roll angle for consequent fishbones
         float stepAngle = (clampedExitAngle - interpolatedStartRollAngle) / (fbGroup.ChildCount - 1);
 
-        var beforeSectionPoses = BeforeSectionPoints(controlPoints, minDistBetweenFishbones, interpolatedStartRollAngle, stepAngle, split);
-        var afterSectionPoses = AfterSectionPoints(controlPoints, minDistBetweenFishbones, interpolatedStartRollAngle, stepAngle, split);
+        // Run both sections in parallel
+        int fbCount = fbGroup.ChildCount;
+        Task<List<Pose>> beforeTask = Task.Run(() => BeforeSectionPoints(controlPoints, resolution, minDistBetweenFishbones, interpolatedStartRollAngle, stepAngle, split));
+        Task<List<Pose>> afterTask = Task.Run(() => AfterSectionPoints(controlPoints, resolution, minDistBetweenFishbones, interpolatedStartRollAngle, stepAngle, split, fbCount));
 
-        List<Pose> fbPoses = new();
-        fbPoses.AddRange(beforeSectionPoses);
-        fbPoses.AddRange(afterSectionPoses);
+        // Wait for both to complete
+        Task.WaitAll(beforeTask, afterTask);
+
+        List<Pose> fbPoses = new(fbGroup.ChildCount);
+        fbPoses.AddRange(beforeTask.Result);
+        fbPoses.AddRange(afterTask.Result);
         return fbPoses.ToArray();
     }
 
