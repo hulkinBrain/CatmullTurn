@@ -55,91 +55,102 @@ public class CatmullRomSpline : MonoBehaviour
 
     List<Pose> BeforeSectionPoints(List<Vector3> controlPoints, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split)
     {
-        List<Pose> poses = new();
+        List<Pose> poses = new(split);
         float accumulatedDistance = 0;
 
         var beforeSectionControlPoints = controlPoints.GetRange(0, 4);
         poses.Add(new Pose(beforeSectionControlPoints[2], Quaternion.identity));
 
-        Queue<Vector3> intraBeforePoints = new();
+        Vector3 previousPoint = default;
+        Vector3 currentPoint;
+        bool hasFirstPoint = false;
+
         for (int i = resolution; i >= 0; i--)
         {
-            float t = i / (float)resolution; // Normalize t between 0 and 1
-            Vector3 point = CatmullRom(beforeSectionControlPoints[0], beforeSectionControlPoints[1], beforeSectionControlPoints[2], beforeSectionControlPoints[3], t);
-            intraBeforePoints.Enqueue(point);
-            if (intraBeforePoints.Count > 1)
+            float t = i / (float)resolution;
+            currentPoint = CatmullRom(beforeSectionControlPoints[0], beforeSectionControlPoints[1], beforeSectionControlPoints[2], beforeSectionControlPoints[3], t);
+
+            if (hasFirstPoint)
             {
-                if (intraBeforePoints.Count > 2)
-                {
-                    intraBeforePoints.Dequeue();
-                }
-                var p1 = intraBeforePoints.ElementAt(1);
-                var p2 = intraBeforePoints.ElementAt(0);
-                var pCurrTopLastDistance = Vector3.Distance(p1, p2);
-                accumulatedDistance += pCurrTopLastDistance;
+                float distance = Vector3.Distance(currentPoint, previousPoint);
+                accumulatedDistance += distance;
+
                 if (accumulatedDistance >= minDistBetweenFishbones)
                 {
                     accumulatedDistance = 0;
 
-                    var intraP2P1Vec = p2 - p1;
-                    var angle = Quaternion.LookRotation(intraP2P1Vec).eulerAngles;
-                    var pose = new Pose(p1, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split - poses.Count - 1))));
+                    Vector3 direction = previousPoint - currentPoint;
+                    Vector3 angle = Quaternion.LookRotation(direction).eulerAngles;
+                    Pose pose = new(currentPoint, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split - poses.Count - 1))));
                     poses.Add(pose);
+
+                    if (poses.Count == split)
+                    {
+                        break;
+                    }
                 }
             }
-            if (poses.Count == split)
-            {
-                break;
-            }
+
+            previousPoint = currentPoint;
+            hasFirstPoint = true;
         }
+
         poses.Reverse();
-        poses = poses.GetRange(0, poses.Count - 1);
+        if (poses.Count > 1)
+        {
+            poses.RemoveAt(poses.Count - 1);
+        }
         return poses;
     }
 
     List<Pose> AfterSectionPoints(List<Vector3> controlPoints, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split)
     {
-        List<Pose> poses = new();
+        List<Pose> poses = new(split);
         var afterSectionControlPoints = controlPoints.GetRange(1, 4);
-        Queue<Vector3> intraAfterPoints = new();
         float accumulatedDistance = 0;
 
         poses.Add(new Pose(afterSectionControlPoints[1], Quaternion.identity));
+
+        Vector3 previousPoint = default;
+        Vector3 currentPoint;
+        bool hasFirstPoint = false;
+
         for (int i = 0; i <= resolution; i++)
         {
-            float t = i / (float)resolution; // Normalize t between 0 and 1
-            Vector3 point = CatmullRom(afterSectionControlPoints[0], afterSectionControlPoints[1], afterSectionControlPoints[2], afterSectionControlPoints[3], t);
-            intraAfterPoints.Enqueue(point);
-            if (intraAfterPoints.Count > 1)
+            float t = i / (float)resolution;
+            currentPoint = CatmullRom(afterSectionControlPoints[0], afterSectionControlPoints[1], afterSectionControlPoints[2], afterSectionControlPoints[3], t);
+
+            if (hasFirstPoint)
             {
-                if (intraAfterPoints.Count > 2)
-                {
-                    intraAfterPoints.Dequeue();
-                }
-                var p1 = intraAfterPoints.ElementAt(0);
-                var p2 = intraAfterPoints.ElementAt(1);
-                var pCurrTopLastDistance = Vector3.Distance(p1, p2);
-                accumulatedDistance += pCurrTopLastDistance;
+                float distance = Vector3.Distance(previousPoint, currentPoint);
+                accumulatedDistance += distance;
+
                 if (accumulatedDistance >= minDistBetweenFishbones)
                 {
                     accumulatedDistance = 0;
 
-                    var intraP2P1Vec = p2 - p1;
-                    var angle = Quaternion.LookRotation(intraP2P1Vec).eulerAngles;
-                    var pose = new Pose(p1, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split + poses.Count))));
+                    Vector3 direction = currentPoint - previousPoint;
+                    Vector3 angle = Quaternion.LookRotation(direction).eulerAngles;
+                    Pose pose = new(previousPoint, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split + poses.Count))));
                     poses.Add(pose);
+
                     if (poses.Count == 2)
                     {
                         angle = Quaternion.LookRotation(poses[^1].position - poses[^2].position).eulerAngles;
-                        poses[^2] = new Pose(poses[^2].position, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split - 1))));
+                        poses[^2] = new(poses[^2].position, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split - 1))));
+                    }
+
+                    if (poses.Count == split)
+                    {
+                        break;
                     }
                 }
             }
-            if (poses.Count == split)
-            {
-                break;
-            }
+
+            previousPoint = currentPoint;
+            hasFirstPoint = true;
         }
+
         return poses;
     }
 
