@@ -56,11 +56,16 @@ public class CatmullRomSpline : MonoBehaviour
 
     List<Pose> BeforeSectionPoints(List<Vector3> controlPoints, int resolution, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split)
     {
-        List<Pose> poses = new();
+        List<Pose> poses = new(split);
         float accumulatedDistance = 0;
+        float invResolution = 1f / resolution;
 
-        var beforeSectionControlPoints = controlPoints.GetRange(0, 4);
-        poses.Add(new Pose(beforeSectionControlPoints[2], Quaternion.identity));
+        Vector3 p0 = controlPoints[0];
+        Vector3 p1 = controlPoints[1];
+        Vector3 p2 = controlPoints[2];
+        Vector3 p3 = controlPoints[3];
+
+        poses.Add(new Pose(p2, Quaternion.identity));
 
         Vector3 previousPoint = default;
         Vector3 currentPoint;
@@ -68,8 +73,8 @@ public class CatmullRomSpline : MonoBehaviour
 
         for (int i = resolution; i >= 0; i--)
         {
-            float t = i / (float)resolution;
-            currentPoint = CatmullRom(beforeSectionControlPoints[0], beforeSectionControlPoints[1], beforeSectionControlPoints[2], beforeSectionControlPoints[3], t);
+            float t = i * invResolution;
+            currentPoint = CatmullRom(p0, p1, p2, p3, t);
 
             if (hasFirstPoint)
             {
@@ -106,11 +111,17 @@ public class CatmullRomSpline : MonoBehaviour
 
     List<Pose> AfterSectionPoints(List<Vector3> controlPoints, int resolution, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split, int fbCount)
     {
-        List<Pose> poses = new();
-        var afterSectionControlPoints = controlPoints.GetRange(1, 4);
+        int capacity = fbCount - split + 1;
+        List<Pose> poses = new(capacity);
         float accumulatedDistance = 0;
+        float invResolution = 1f / resolution;
 
-        poses.Add(new Pose(afterSectionControlPoints[1], Quaternion.identity));
+        Vector3 p0 = controlPoints[1];
+        Vector3 p1 = controlPoints[2];
+        Vector3 p2 = controlPoints[3];
+        Vector3 p3 = controlPoints[4];
+
+        poses.Add(new Pose(p1, Quaternion.identity));
 
         Vector3 previousPoint = default;
         Vector3 currentPoint;
@@ -118,8 +129,8 @@ public class CatmullRomSpline : MonoBehaviour
 
         for (int i = 0; i <= resolution; i++)
         {
-            float t = i / (float)resolution;
-            currentPoint = CatmullRom(afterSectionControlPoints[0], afterSectionControlPoints[1], afterSectionControlPoints[2], afterSectionControlPoints[3], t);
+            float t = i * invResolution;
+            currentPoint = CatmullRom(p0, p1, p2, p3, t);
 
             if (hasFirstPoint)
             {
