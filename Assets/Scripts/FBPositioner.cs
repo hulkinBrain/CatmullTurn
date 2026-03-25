@@ -31,7 +31,7 @@ public class FBPositioner : MonoBehaviour
         _fishboneGroup = transform;
         _poses = poses;
         _fishboneGroup.position = poses[0].position;
-        for (int i = 0; i < _fishboneGroup.childCount; i++)
+        for (int i = 0; i < poses.Length; i++)
         {
             var child = _fishboneGroup.GetChild(i);
             child.position = poses[i].position;

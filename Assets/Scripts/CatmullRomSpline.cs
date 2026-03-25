@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using UnityEngine;
 
 public class CatmullRomSpline : MonoBehaviour
@@ -7,6 +9,7 @@ public class CatmullRomSpline : MonoBehaviour
     public float startRollAngle = 45f;
     public float endRollAngle = 90f;
     public FBPositioner positioner;
+    public int resolution = 20;
 
     [SerializeField]
     private bool _includePitchAngle = false;
@@ -23,7 +26,7 @@ public class CatmullRomSpline : MonoBehaviour
 
             for (int i = 0; i < poses.Length; i++)
             {
-                Gizmos.DrawSphere(poses[i].position, 0.1f);
+                Gizmos.DrawSphere(poses[i].position, (i % resolution == 0) ? 0.1f : 0.075f);
                 if(i > 0)
                 {
                     Gizmos.DrawLine(poses[i].position, poses[i - 1].position); // Draw line segment
@@ -33,7 +36,7 @@ public class CatmullRomSpline : MonoBehaviour
     }
     List<Vector3> GetControlPoints(Vector3 beforePosition, Vector3 onPosition, Vector3 afterPosition)
     {
-        List<Vector3> controlPoints = new()
+        return new List<Vector3>() 
         {
             beforePosition,
             beforePosition,
@@ -41,7 +44,6 @@ public class CatmullRomSpline : MonoBehaviour
             afterPosition,
             afterPosition
         };
-        return controlPoints;
     }
 
     List<Vector3> GetControlPoints()
@@ -49,68 +51,85 @@ public class CatmullRomSpline : MonoBehaviour
         return GetControlPoints(transform.GetChild(0).position, transform.GetChild(1).position, transform.GetChild(2).position);
     }
 
-
     Pose[] GetCatmullRomSegmentPoints(List<Vector3> controlPoints)
     {
         List<Pose> fbPoses = new();
         List<Vector3> fbPositions = new();
-        var resolution = positioner.ChildCount;
-        var p1p2Vec = controlPoints[1] - controlPoints[2];
-        var p2p3Vec = controlPoints[2] - controlPoints[3];
-        if(!_includePitchAngle)
+        List<Pose> debugPoints = new();
+
+        List<int> poseIndices = new();
+        //var resolution = 20;
+        var minDistBetweenFishbones = positioner.transform.localScale.z * positioner.transform.GetChild(0).localScale.z;
+
+        // Vectors between control points
+        var p1p2Vec = controlPoints[1] - controlPoints[2];  // Vector from 1st control point to 2nd control point
+        var p2p3Vec = controlPoints[2] - controlPoints[3];  // Vector from 2nd control point to 3rd control point
+
+        if (!_includePitchAngle)
         {
             p1p2Vec.y = p2p3Vec.y = 0;
         }
+
+        // Clamps exit angle between -endRollAngle and endRollAngle to avoid extreme roll angles for fishbones
         float clampedExitAngle = Mathf.Clamp(Vector3.SignedAngle(p1p2Vec, p2p3Vec, Vector3.up), -endRollAngle, endRollAngle);
-        float interpolatedStartRollAngle = startRollAngle * (clampedExitAngle / endRollAngle);  // Interpolate "startRollAngle" for first fishbone from 0 to 45deg based on "clampedExitAngle"
-        float stepAngle = (clampedExitAngle - interpolatedStartRollAngle) / (resolution - 1);   // Calculate the step increment in roll angle for consequent fishbones
+        
+        // Interpolate "startRollAngle" for first fishbone from 0 to 45deg based on "clampedExitAngle"
+        float interpolatedStartRollAngle = startRollAngle * (clampedExitAngle / endRollAngle);
 
-        int sectionCount = 2;   // There are 2 sections. The before section and after section from which the halfpipe points will be taken
+        // Calculate the step increment in roll angle for consequent fishbones
+        float stepAngle = (clampedExitAngle - interpolatedStartRollAngle) / (resolution - 1);
 
-        for (int i = 0; i < sectionCount; i++)
+        var points = controlPoints.GetRange(0, 4);
+        int startIndex = resolution;
+        int endIndex = 0;
+        Queue<Vector3> intraPoints = new();
+        float accumulatedDistance = 0f;
+
+        #region Before section
+        for(int i = startIndex; i >=endIndex; i--)
         {
-            var points = controlPoints.GetRange(i, 4);
-
-            int startIndex;
-            int endIndex;
-            if(i == 0)
+            float t = i / (float)resolution; // Normalize t between 0 and 1
+            Vector3 point = CatmullRom(points[0], points[1], points[2], points[3], t);
+            debugPoints.Add(new Pose(point, Quaternion.identity));
+            intraPoints.Enqueue(point);
+            if(i == startIndex)
             {
-                startIndex = resolution - split + 1;
-                endIndex = resolution;
-            }
-            else
-            {
-                startIndex = 1;
-                endIndex = resolution - split;
-            }
-            for (int j = startIndex; j <= endIndex; j++)
-            {
-                float t = j / (float)resolution; // Normalize t between 0 and 1
-                Vector3 point = CatmullRom(points[0], points[1], points[2], points[3], t);
+                var pose = new Pose(point, Quaternion.identity);
+                fbPoses.Add(pose);
                 fbPositions.Add(point);
-                if(fbPositions.Count > 1)
+            }
+            if (intraPoints.Count > 1)
+            {
+                if(intraPoints.Count > 2)
                 {
-                    var p1 = fbPositions[^2];
-                    var p2 = fbPositions[^1];
-                    var intraP2P1Vec = p2 - p1;
-                    if(!_includePitchAngle)
-                    {
-                        p1.y = p2.y = intraP2P1Vec.y = 0;
-                    }
-                    var angle = Quaternion.LookRotation(intraP2P1Vec).eulerAngles;
-                    var pose = new Pose(p1, Quaternion.Euler(angle.x, angle.y, -(interpolatedStartRollAngle + (fbPositions.Count - 2) * stepAngle)));
-                    fbPoses.Add(pose);
+                    intraPoints.Dequeue();
+                }
+                var p1 = intraPoints.ElementAt(1);
+                var p2 = intraPoints.ElementAt(0);
+                var pCurrTopLastDistance = Vector3.Distance(p1, p2);
+                accumulatedDistance += pCurrTopLastDistance;
+                if (accumulatedDistance >= minDistBetweenFishbones)
+                {
+                    accumulatedDistance = 0;
 
-                    // For final fishbone
-                    if(fbPositions.Count == resolution)
-                    {
-                        angle = Quaternion.LookRotation(-p2p3Vec).eulerAngles;
-                        pose = new Pose(p2, Quaternion.Euler(angle.x, angle.y, -(clampedExitAngle)));
-                        fbPoses.Add(pose);
-                    }
+                    var intraP2P1Vec = p2 - p1;
+                    var angle = Quaternion.LookRotation(intraP2P1Vec).eulerAngles;
+                    var pose = new Pose(p1, Quaternion.Euler(angle.x, angle.y, -(interpolatedStartRollAngle + stepAngle * (split - fbPositions.Count))));
+                    fbPoses.Add(pose);
+                    fbPositions.Add(p1);
                 }
             }
+            if(fbPositions.Count == split)
+            {
+                break;
+            }
         }
+        intraPoints.Clear();
+        #endregion
+
+        #region After region
+        #endregion
+
         return fbPoses.ToArray();
     }
 
