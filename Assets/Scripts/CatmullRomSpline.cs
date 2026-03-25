@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
@@ -8,7 +9,7 @@ public class CatmullRomSpline : MonoBehaviour
     public int split = 2;
     public float startRollAngle = 45f;
     public float endRollAngle = 90f;
-    public FBPositioner positioner;
+    public FBPositioner fbGroup;
     public int resolution = 20;
 
     [SerializeField]
@@ -59,7 +60,7 @@ public class CatmullRomSpline : MonoBehaviour
 
         List<int> poseIndices = new();
         //var resolution = 20;
-        var minDistBetweenFishbones = positioner.transform.localScale.z * positioner.transform.GetChild(0).localScale.z;
+        var minDistBetweenFishbones = fbGroup.transform.localScale.z * fbGroup.transform.GetChild(0).localScale.z * 2;
 
         // Vectors between control points
         var p1p2Vec = controlPoints[1] - controlPoints[2];  // Vector from 1st control point to 2nd control point
@@ -77,7 +78,7 @@ public class CatmullRomSpline : MonoBehaviour
         float interpolatedStartRollAngle = startRollAngle * (clampedExitAngle / endRollAngle);
 
         // Calculate the step increment in roll angle for consequent fishbones
-        float stepAngle = (clampedExitAngle - interpolatedStartRollAngle) / (resolution - 1);
+        float stepAngle = (clampedExitAngle - interpolatedStartRollAngle) / (fbGroup.ChildCount - 1);
 
         var points = controlPoints.GetRange(0, 4);
         int startIndex = resolution;
@@ -114,8 +115,8 @@ public class CatmullRomSpline : MonoBehaviour
 
                     var intraP2P1Vec = p2 - p1;
                     var angle = Quaternion.LookRotation(intraP2P1Vec).eulerAngles;
-                    var pose = new Pose(p1, Quaternion.Euler(angle.x, angle.y, -(interpolatedStartRollAngle + stepAngle * (split - fbPositions.Count))));
-                    fbPoses.Add(pose);
+                    var pose = new Pose(p1, Quaternion.Euler(angle.x, angle.y, -(interpolatedStartRollAngle + stepAngle * (split - fbPositions.Count - 1))));
+                    fbPoses.Insert(0, pose);
                     fbPositions.Add(p1);
                 }
             }
@@ -124,10 +125,55 @@ public class CatmullRomSpline : MonoBehaviour
                 break;
             }
         }
+        accumulatedDistance = 0;
         intraPoints.Clear();
         #endregion
 
         #region After region
+        points = controlPoints.GetRange(1, 4);
+        startIndex = 0;
+        endIndex = resolution;
+        bool firstPointInAfterSection = true;
+        for (int i = startIndex; i <= endIndex; i++)
+        {
+            float t = i / (float)resolution; // Normalize t between 0 and 1
+            Vector3 point = CatmullRom(points[0], points[1], points[2], points[3], t);
+            debugPoints.Add(new Pose(point, Quaternion.identity));
+            intraPoints.Enqueue(point);
+            if (intraPoints.Count > 1)
+            {
+                if (intraPoints.Count > 2)
+                {
+                    intraPoints.Dequeue();
+                }
+                var p1 = intraPoints.ElementAt(0);
+                var p2 = intraPoints.ElementAt(1);
+                var pCurrTopLastDistance = Vector3.Distance(p1, p2);
+                accumulatedDistance += pCurrTopLastDistance;
+                if (accumulatedDistance >= minDistBetweenFishbones)
+                {
+                    accumulatedDistance = 0;
+
+                    var intraP2P1Vec = p2 - p1;
+                    var angle = Quaternion.LookRotation(intraP2P1Vec).eulerAngles;
+                    var pose = new Pose(p1, Quaternion.Euler(angle.x, angle.y, -(interpolatedStartRollAngle + stepAngle * fbPositions.Count)));
+                    fbPoses.Add(pose);
+                    fbPositions.Add(p1);
+                    if(firstPointInAfterSection)
+                    {
+                        firstPointInAfterSection = false;
+                        angle = Quaternion.LookRotation(fbPoses[^1].position - fbPoses[^2].position).eulerAngles;
+                        fbPoses[^2] = new Pose(fbPoses[^2].position, Quaternion.Euler(angle.x, angle.y, -(interpolatedStartRollAngle + stepAngle * (split - 1))));
+                    }
+                }
+            }
+
+            if (fbPositions.Count == fbGroup.ChildCount)
+            {
+                break;
+            }
+        }
+        intraPoints.Clear();
         #endregion
 
         return fbPoses.ToArray();
@@ -144,6 +190,6 @@ public class CatmullRomSpline : MonoBehaviour
 
     public void DoAnimate()
     {
-        positioner?.StartPositionAnim(GetCatmullRomSegmentPoints(GetControlPoints()));
+        fbGroup?.StartPositionAnim(GetCatmullRomSegmentPoints(GetControlPoints()));
     }
 }
