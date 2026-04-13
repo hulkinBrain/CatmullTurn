@@ -7,7 +7,6 @@ public class FBPositioner : MonoBehaviour
 
     bool _isStarted;
     Pose[] _poses;
-    float _interpFactor;
     Transform _fishboneGroup;
     public float AnimDuration = 1f;
 
@@ -23,7 +22,6 @@ public class FBPositioner : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        UpdatePositionAnim();
     }
 
     public void StartPositionAnim(Pose[] poses)
@@ -38,16 +36,5 @@ public class FBPositioner : MonoBehaviour
             child.localRotation = poses[i].rotation;
         }
         _poses = poses;
-        //_isStarted = true;
-        _interpFactor = 0f;
-    }
-
-    void UpdatePositionAnim()
-    {
-        if (_isStarted && _interpFactor < 1f)
-        {
-            _interpFactor = Mathf.Clamp01((_interpFactor + Time.deltaTime) / AnimDuration);
-            var intraFbInterpFactor = _interpFactor % _fishboneGroup.childCount;
-        }
     }
 }

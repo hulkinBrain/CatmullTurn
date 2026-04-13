@@ -37,15 +37,16 @@ public class CatmullRomSpline : MonoBehaviour
             }
         }
     }
-    List<Vector3> GetControlPoints(Vector3 beforePosition, Vector3 onPosition, Vector3 afterPosition)
+    List<Vector3> GetControlPoints(Vector3 pos1, Vector3 pos2, Vector3 pos3)
     {
+        var pivotPosition = pos2;
         return new List<Vector3>() 
         {
-            beforePosition,
-            beforePosition,
-            onPosition,
-            afterPosition,
-            afterPosition
+            pos1,
+            pos1,
+            pos2,
+            pos3,
+            pos3
         };
     }
 
@@ -54,9 +55,14 @@ public class CatmullRomSpline : MonoBehaviour
         return GetControlPoints(transform.GetChild(0).position, transform.GetChild(1).position, transform.GetChild(2).position);
     }
 
-    List<Pose> BeforeSectionPoints(List<Vector3> controlPoints, int resolution, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split)
+    Pose[] BeforeSectionPoints(List<Vector3> controlPoints, int resolution, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split)
     {
-        List<Pose> poses = new(split);
+        if(split == 1)
+        {
+            return null;
+        }
+        Pose[] poses = new Pose[split];
+        int count = 0;
         float accumulatedDistance = 0;
         float invResolution = 1f / resolution;
 
@@ -65,9 +71,9 @@ public class CatmullRomSpline : MonoBehaviour
         Vector3 p2 = controlPoints[2];
         Vector3 p3 = controlPoints[3];
 
-        poses.Add(new Pose(p2, Quaternion.identity));
+        poses[count++] = new Pose(p2, Quaternion.identity);
 
-        Vector3 previousPoint = default;
+        Vector3 previousPoint = poses[0].position;
         Vector3 currentPoint;
         bool hasFirstPoint = false;
 
@@ -85,12 +91,11 @@ public class CatmullRomSpline : MonoBehaviour
                 {
                     accumulatedDistance = 0;
 
-                    Vector3 direction = previousPoint - currentPoint;
+                    Vector3 direction = poses[count - 1].position - currentPoint;
                     Vector3 angle = Quaternion.LookRotation(direction).eulerAngles;
-                    Pose pose = new(currentPoint, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split - poses.Count - 1))));
-                    poses.Add(pose);
+                    poses[count++] = new Pose(currentPoint, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split - count - 1))));
 
-                    if (poses.Count == split)
+                    if (count == split)
                     {
                         break;
                     }
@@ -101,18 +106,26 @@ public class CatmullRomSpline : MonoBehaviour
             hasFirstPoint = true;
         }
 
-        poses.Reverse();
-        if (poses.Count > 1)
+        System.Array.Reverse(poses, 0, count);
+        if (count > 1)
         {
-            poses.RemoveAt(poses.Count - 1);
+            int newCount = count - 1;
+            Pose[] trimmed = new Pose[newCount];
+            System.Array.Copy(poses, 0, trimmed, 0, newCount);
+            return trimmed;
+        }
+        if (count < split)
+        {
+            System.Array.Resize(ref poses, count);
         }
         return poses;
     }
 
-    List<Pose> AfterSectionPoints(List<Vector3> controlPoints, int resolution, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split, int fbCount)
+    Pose[] AfterSectionPoints(List<Vector3> controlPoints, int resolution, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split, int fbCount)
     {
         int capacity = fbCount - split + 1;
-        List<Pose> poses = new(capacity);
+        Pose[] poses = new Pose[capacity];
+        int count = 0;
         float accumulatedDistance = 0;
         float invResolution = 1f / resolution;
 
@@ -121,9 +134,9 @@ public class CatmullRomSpline : MonoBehaviour
         Vector3 p2 = controlPoints[3];
         Vector3 p3 = controlPoints[4];
 
-        poses.Add(new Pose(p1, Quaternion.identity));
+        poses[count++] = new Pose(p1, Quaternion.identity);
 
-        Vector3 previousPoint = default;
+        Vector3 previousPoint = poses[0].position;
         Vector3 currentPoint;
         bool hasFirstPoint = false;
 
@@ -141,21 +154,17 @@ public class CatmullRomSpline : MonoBehaviour
                 {
                     accumulatedDistance = 0;
 
-                    Vector3 direction = currentPoint - previousPoint;
+                    Vector3 direction = currentPoint - poses[count - 1].position;
                     Vector3 angle = Quaternion.LookRotation(direction).eulerAngles;
-                    Pose pose = new(previousPoint, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split + poses.Count - 1))));
-                    poses.Add(pose);
+                    poses[count - 1].rotation = Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split + count - 2)));
 
-                    if (poses.Count == 2)
+                    if (count == capacity)
                     {
-                        angle = Quaternion.LookRotation(poses[^1].position - poses[^2].position).eulerAngles;
-                        poses[^2] = new(poses[^2].position, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split - 1))));
-                    }
-
-                    if (poses.Count == fbCount - split + 1)
-                    {
+                        angle = Quaternion.LookRotation(p3 - poses[count - 1].position).eulerAngles;
+                        poses[count - 1].rotation = Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split + count - 2)));
                         break;
                     }
+                    poses[count++] = new Pose(currentPoint, Quaternion.identity);
                 }
             }
 
@@ -163,17 +172,20 @@ public class CatmullRomSpline : MonoBehaviour
             hasFirstPoint = true;
         }
 
+        if (count < capacity)
+        {
+            System.Array.Resize(ref poses, count);
+        }
         return poses;
     }
 
     Pose[] GetCatmullRomSegmentPoints(List<Vector3> controlPoints)
     {
-        //var resolution = 20;
         var minDistBetweenFishbones = fbGroup.transform.localScale.z * fbGroup.transform.GetChild(0).localScale.z * 2;
 
         // Vectors between control points
-        var p1p2Vec = controlPoints[1] - controlPoints[2];  // Vector from 1st control point to 2nd control point
-        var p2p3Vec = controlPoints[2] - controlPoints[3];  // Vector from 2nd control point to 3rd control point
+        var p1p2Vec = controlPoints[2] - controlPoints[1];  // Vector from 1st control point to 2nd control point
+        var p2p3Vec = controlPoints[3] - controlPoints[2];  // Vector from 2nd control point to 3rd control point
 
         if (!_includePitchAngle)
         {
@@ -191,15 +203,21 @@ public class CatmullRomSpline : MonoBehaviour
 
         // Run both sections in parallel
         int fbCount = fbGroup.ChildCount;
-        Task<List<Pose>> beforeTask = Task.Run(() => BeforeSectionPoints(controlPoints, resolution, minDistBetweenFishbones, interpolatedStartRollAngle, stepAngle, split));
-        Task<List<Pose>> afterTask = Task.Run(() => AfterSectionPoints(controlPoints, resolution, minDistBetweenFishbones, interpolatedStartRollAngle, stepAngle, split, fbCount));
+        Task<Pose[]> beforeTask = Task.Run(() => BeforeSectionPoints(controlPoints, resolution, minDistBetweenFishbones, interpolatedStartRollAngle, stepAngle, split));
+        Task<Pose[]> afterTask = Task.Run(() => AfterSectionPoints(controlPoints, resolution, minDistBetweenFishbones, interpolatedStartRollAngle, stepAngle, split, fbCount));
 
         // Wait for both to complete
         Task.WaitAll(beforeTask, afterTask);
 
         List<Pose> fbPoses = new(fbGroup.ChildCount);
-        fbPoses.AddRange(beforeTask.Result);
-        fbPoses.AddRange(afterTask.Result);
+        if(beforeTask.Result != null)
+        {
+            fbPoses.AddRange(beforeTask.Result);
+        }
+        if(afterTask.Result != null)
+        {
+            fbPoses.AddRange(afterTask.Result);
+        }
         return fbPoses.ToArray();
     }
 
@@ -210,10 +228,5 @@ public class CatmullRomSpline : MonoBehaviour
                        (-p0 + p2) * t +
                        (2f * p0 - 5f * p1 + 4f * p2 - p3) * t * t +
                        (-p0 + 3f * p1 - 3f * p2 + p3) * t * t * t);
-    }
-
-    public void DoAnimate()
-    {
-        fbGroup?.StartPositionAnim(GetCatmullRomSegmentPoints(GetControlPoints()));
     }
 }

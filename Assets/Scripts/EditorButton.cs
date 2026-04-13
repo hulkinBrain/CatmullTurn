@@ -13,7 +13,7 @@ public class EditorButton : Editor
         if(GUILayout.Button("Animate"))
         {
             CatmullRomSpline catmullRom = (CatmullRomSpline)target;
-            catmullRom.DoAnimate();
+            // catmullRom.DoAnimate();
         }
     }
 }
