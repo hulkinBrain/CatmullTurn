@@ -1,13 +1,10 @@
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Drawing;
-using System.Linq;
-using System.Reflection;
 using System.Threading.Tasks;
 using UnityEngine;
 
 public class CatmullRomSpline : MonoBehaviour
 {
+    [Range(1, 5)]
     public int split = 2;
     public float startRollAngle = 45f;
     public float endRollAngle = 90f;
@@ -29,17 +26,18 @@ public class CatmullRomSpline : MonoBehaviour
         {
             for (int i = 0; i < poses.Length; i++)
             {
-                Gizmos.DrawSphere(poses[i].position, (i % resolution == 0) ? 0.1f : 0.075f);
+                var worldPosition = fbGroup.transform.TransformPoint(poses[i].position);
+                Gizmos.DrawSphere(worldPosition, (i % resolution == 0) ? 0.1f : 0.075f);
                 if(i > 0)
                 {
-                    Gizmos.DrawLine(poses[i].position, poses[i - 1].position); // Draw line segment
+                    var previousWorldPosition = fbGroup.transform.TransformPoint(poses[i - 1].position);
+                    Gizmos.DrawLine(worldPosition, previousWorldPosition); // Draw line segment
                 }
             }
         }
     }
     List<Vector3> GetControlPoints(Vector3 pos1, Vector3 pos2, Vector3 pos3)
     {
-        var pivotPosition = pos2;
         return new List<Vector3>() 
         {
             pos1,
@@ -50,6 +48,7 @@ public class CatmullRomSpline : MonoBehaviour
         };
     }
 
+    // Convert 3 control points to 5 control points for Catmull-Rom spline (duplicate start and end points)
     List<Vector3> GetControlPoints()
     {
         return GetControlPoints(transform.GetChild(0).position, transform.GetChild(1).position, transform.GetChild(2).position);
@@ -192,13 +191,11 @@ public class CatmullRomSpline : MonoBehaviour
             p1p2Vec.y = p2p3Vec.y = 0;
         }
 
-        // Clamps exit angle between -endRollAngle and endRollAngle to avoid extreme roll angles for fishbones
         float clampedExitAngle = Mathf.Clamp(Vector3.SignedAngle(p1p2Vec, p2p3Vec, Vector3.up), -endRollAngle, endRollAngle);
 
         // Interpolate "startRollAngle" for first fishbone from 0 to 45deg based on "clampedExitAngle"
         float interpolatedStartRollAngle = startRollAngle * (clampedExitAngle / endRollAngle);
 
-        // Calculate the step increment in roll angle for consequent fishbones
         float stepAngle = (clampedExitAngle - interpolatedStartRollAngle) / (fbGroup.ChildCount - 1);
 
         // Run both sections in parallel
@@ -209,16 +206,25 @@ public class CatmullRomSpline : MonoBehaviour
         // Wait for both to complete
         Task.WaitAll(beforeTask, afterTask);
 
-        List<Pose> fbPoses = new(fbGroup.ChildCount);
-        if(beforeTask.Result != null)
+        Pose[] beforeResult = beforeTask.Result;
+        Pose[] afterResult = afterTask.Result;
+        int beforeCount = beforeResult?.Length ?? 0;
+        int afterCount = afterResult?.Length ?? 0;
+
+        // Convert to local space and combine results
+        Quaternion invRotation = Quaternion.Inverse(fbGroup.transform.rotation);
+        Pose[] poseInLocalPose = new Pose[beforeCount + afterCount];
+        for (int i = 0; i < beforeCount; i++)
         {
-            fbPoses.AddRange(beforeTask.Result);
+            poseInLocalPose[i] = new Pose(fbGroup.transform.InverseTransformPoint(beforeResult[i].position), invRotation * beforeResult[i].rotation);
         }
-        if(afterTask.Result != null)
+        for (int i = 0; i < afterCount; i++)
         {
-            fbPoses.AddRange(afterTask.Result);
+            poseInLocalPose[beforeCount + i] = new Pose(fbGroup.transform.InverseTransformPoint(afterResult[i].position), invRotation * afterResult[i].rotation);
         }
-        return fbPoses.ToArray();
+        fbGroup.transform.position = controlPoints[2];
+
+        return poseInLocalPose;
     }
 
     Vector3 CatmullRom(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float t)
@@ -226,7 +232,7 @@ public class CatmullRomSpline : MonoBehaviour
         // Catmull-Rom spline formula
         return 0.5f * ((2f * p1) +
                        (-p0 + p2) * t +
-                       (2f * p0 - 5f * p1 + 4f * p2 - p3) * t * t +
-                       (-p0 + 3f * p1 - 3f * p2 + p3) * t * t * t);
+                       t * t * (2f * p0 - 5f * p1 + 4f * p2 - p3) +
+                       t * t * t * (-p0 + 3f * p1 - 3f * p2 + p3));
     }
 }
