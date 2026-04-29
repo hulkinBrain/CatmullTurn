@@ -123,232 +123,20 @@ public class CatmullRomSpline : MonoBehaviour
         return new Vector3[] { pos1, pos1, pos2, pos3, pos3 };
     }
 
-    Pose[] BeforeSectionPoints(Vector3[] controlPoints, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split)
+    Vector3 CatmullRomFull(Vector3[] augmented, float t)
     {
-        if(split == 1)
+        if (t <= 0.5f)
         {
-            return null;
+            return CatmullRom(augmented[0], augmented[1], augmented[2], augmented[3], t * 2f);
         }
-        Pose[] poses = new Pose[split];
-        int count = 0;
-        float accumulatedDistance = 0;
-        int splineResolution = 256;
-        float invResolution = 1f / splineResolution;
-
-        Vector3 p0 = controlPoints[0];
-        Vector3 p1 = controlPoints[1];
-        Vector3 p2 = controlPoints[2];
-        Vector3 p3 = controlPoints[3];
-
-        poses[count++] = new Pose(p2, Quaternion.identity);
-
-        Vector3 previousPoint = poses[0].position;
-        Vector3 currentPoint;
-        bool hasFirstPoint = false;
-
-        for (int i = splineResolution; i >= 0; i--)
+        else
         {
-            float t = i * invResolution;
-            currentPoint = CatmullRom(p0, p1, p2, p3, t);
-
-            if (hasFirstPoint)
-            {
-                float distance = Vector3.Distance(currentPoint, previousPoint);
-                accumulatedDistance += distance;
-
-                if (accumulatedDistance >= minDistBetweenFishbones)
-                {
-                    accumulatedDistance = 0;
-
-                    Vector3 direction = poses[count - 1].position - currentPoint;
-                    Vector3 angle = Quaternion.LookRotation(direction).eulerAngles;
-                    poses[count++] = new Pose(currentPoint, Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split - count - 1))));
-
-                    if (count == split)
-                    {
-                        break;
-                    }
-                }
-            }
-
-            previousPoint = currentPoint;
-            hasFirstPoint = true;
+            return CatmullRom(augmented[1], augmented[2], augmented[3], augmented[4], (t - 0.5f) * 2f);
         }
-
-        System.Array.Reverse(poses, 0, count);
-
-        // If we have more points than split, trim the array to the actual count
-        if (count > 1)
-        {
-            int newCount = count - 1;
-            Pose[] trimmed = new Pose[newCount];
-            System.Array.Copy(poses, 0, trimmed, 0, newCount);
-            return trimmed;
-        }
-
-        // If we have fewer points than split, resize the array to the actual count
-        if (count < split)
-        {
-            System.Array.Resize(ref poses, count);
-        }
-        return poses;
     }
 
-    Pose[] AfterSectionPoints(Vector3[] controlPoints, float minDistBetweenFishbones, float startRollAngle, float stepRollAngle, int split, int fbCount)
-    {
-        int capacity = fbCount - split + 1;
-        Pose[] poses = new Pose[capacity];
-        int count = 0;
-        float accumulatedDistance = 0;
-        int splineResolution = 256;
-        float invResolution = 1f / splineResolution;
-
-        Vector3 p0 = controlPoints[1];
-        Vector3 p1 = controlPoints[2];
-        Vector3 p2 = controlPoints[3];
-        Vector3 p3 = controlPoints[4];
-
-        poses[count++] = new Pose(p1, Quaternion.identity);
-
-        Vector3 previousPoint = poses[0].position;
-        Vector3 currentPoint;
-        bool hasFirstPoint = false;
-
-        for (int i = 0; i <= splineResolution; i++)
-        {
-            float t = i * invResolution;
-            currentPoint = CatmullRom(p0, p1, p2, p3, t);
-
-            if (hasFirstPoint)
-            {
-                float distance = Vector3.Distance(previousPoint, currentPoint);
-                accumulatedDistance += distance;
-
-                if (accumulatedDistance >= minDistBetweenFishbones)
-                {
-                    accumulatedDistance = 0;
-
-                    Vector3 direction = currentPoint - poses[count - 1].position;
-                    Vector3 angle = Quaternion.LookRotation(direction).eulerAngles;
-                    poses[count - 1].rotation = Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split + count - 2)));
-
-                    if (count == capacity)
-                    {
-                        angle = Quaternion.LookRotation(p3 - poses[count - 1].position).eulerAngles;
-                        poses[count - 1].rotation = Quaternion.Euler(angle.x, angle.y, -(startRollAngle + stepRollAngle * (split + count - 2)));
-                        break;
-                    }
-                    poses[count++] = new Pose(currentPoint, Quaternion.identity);
-                }
-            }
-
-            previousPoint = currentPoint;
-            hasFirstPoint = true;
-        }
-
-        if (count < capacity)
-        {
-            System.Array.Resize(ref poses, count);
-        }
-        return poses;
-    }
-
-    // Spline method to use for situating single fishbones during fanout and for harpoon
-    public enum SplineMethod
-    {
-        CatmullRom,
-        StraightLine,
-        Bezier,
-        CubicSpline,
-        CircleArc
-    }
-
-    // Walk the entire Bezier curve once, place equidistant fishbones centered around pivot closest to pivotTarget
-    Pose[] BezierSectionPoints(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 pivotTarget, float minDist, float startRollAngle, float stepRollAngle, int split, int fbCount)
-    {
-        // Collect ALL equidistant points along the entire curve, tracking pivot simultaneously
-        List<Vector3> allPoints = new List<Vector3>();
-        int splineResolution = 256;
-        float invRes = 1f / splineResolution;
-        int pivotIndex = 0;
-        float closestDistSq = float.MaxValue;
-
-        Vector3 previousPoint = QuadBezier(p0, p1, p2, 0f);
-        allPoints.Add(previousPoint);
-        float firstDistSq = (previousPoint - pivotTarget).sqrMagnitude;
-        if (firstDistSq < closestDistSq)
-        {
-            closestDistSq = firstDistSq;
-            pivotIndex = 0;
-        }
-        float accumulatedDistance = 0f;
-
-        for (int i = 1; i <= splineResolution; i++)
-        {
-            float t = i * invRes;
-            Vector3 currentPoint = QuadBezier(p0, p1, p2, t);
-
-            accumulatedDistance += Vector3.Distance(previousPoint, currentPoint);
-
-            if (accumulatedDistance >= minDist)
-            {
-                accumulatedDistance = 0f;
-                allPoints.Add(currentPoint);
-
-                float distSq = (currentPoint - pivotTarget).sqrMagnitude;
-                if (distSq < closestDistSq)
-                {
-                    closestDistSq = distSq;
-                    pivotIndex = allPoints.Count - 1;
-                }
-            }
-
-            previousPoint = currentPoint;
-        }
-
-        // Select a centered window of fbCount points around pivot
-        int beforePivot = split - 1;
-        int startIndex = pivotIndex - beforePivot;
-        int endIndex = startIndex + fbCount - 1;
-
-        // Clamp to available range
-        if (startIndex < 0)
-        {
-            startIndex = 0;
-        }
-        if (endIndex >= allPoints.Count)
-        {
-            endIndex = allPoints.Count - 1;
-            startIndex = Mathf.Max(0, endIndex - fbCount + 1);
-        }
-
-        int actualCount = endIndex - startIndex + 1;
-
-        // Build poses with roll angles
-        Pose[] poses = new Pose[actualCount];
-        for (int i = 0; i < actualCount; i++)
-        {
-            int idx = startIndex + i;
-            Vector3 direction;
-            if (idx < allPoints.Count - 1)
-            {
-                direction = allPoints[idx + 1] - allPoints[idx];
-            }
-            else
-            {
-                direction = allPoints[idx] - allPoints[idx - 1];
-            }
-
-            Vector3 euler = Quaternion.LookRotation(direction).eulerAngles;
-            float roll = -(startRollAngle + stepRollAngle * i);
-            poses[i] = new Pose(allPoints[idx], Quaternion.Euler(euler.x, euler.y, roll));
-        }
-
-        return poses;
-    }
-
-    // Arc-length LUT approach: build LUT once, then binary search for equidistant points
-    Pose[] CubicSplineSectionPoints(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 pivotTarget, float minDist, float startRollAngle, float stepRollAngle, int split, int fbCount)
+    // Arc-length LUT: build LUT, binary search for equidistant points, pivot windowing
+    Pose[] ArcLengthSectionPoints(System.Func<float, Vector3> evaluate, Vector3 pivotTarget, float minDist, float startRollAngle, float stepRollAngle, int split, int fbCount)
     {
         int splineResolution = 256;
         float invRes = 1f / splineResolution;
@@ -356,12 +144,12 @@ public class CatmullRomSpline : MonoBehaviour
         // Pass 1: Build arc-length LUT
         float[] arcLengths = new float[splineResolution + 1];
         Vector3[] samples = new Vector3[splineResolution + 1];
-        samples[0] = CubicSpline(p0, p1, p2, 0f);
+        samples[0] = evaluate(0f);
         arcLengths[0] = 0f;
 
         for (int i = 1; i <= splineResolution; i++)
         {
-            samples[i] = CubicSpline(p0, p1, p2, i * invRes);
+            samples[i] = evaluate(i * invRes);
             arcLengths[i] = arcLengths[i - 1] + Vector3.Distance(samples[i - 1], samples[i]);
         }
 
@@ -381,7 +169,6 @@ public class CatmullRomSpline : MonoBehaviour
                 break;
             }
 
-            // Binary search for the LUT segment containing targetArc
             int lo = 0, hi = splineResolution;
             while (hi - lo > 1)
             {
@@ -396,7 +183,6 @@ public class CatmullRomSpline : MonoBehaviour
                 }
             }
 
-            // Lerp within segment for sub-sample precision
             float segLen = arcLengths[hi] - arcLengths[lo];
             float frac = segLen > 0f ? (targetArc - arcLengths[lo]) / segLen : 0f;
             Vector3 point = Vector3.Lerp(samples[lo], samples[hi], frac);
@@ -450,103 +236,14 @@ public class CatmullRomSpline : MonoBehaviour
         return poses;
     }
 
-    // Arc-length LUT approach for circle arc section points
-    Pose[] CircleArcSectionPoints(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 pivotTarget, float minDist, float startRollAngle, float stepRollAngle, int split, int fbCount)
+    // Spline method to use for situating single fishbones during fanout and for harpoon
+    public enum SplineMethod
     {
-        int splineResolution = 256;
-        float invRes = 1f / splineResolution;
-
-        // Pass 1: Build arc-length LUT
-        float[] arcLengths = new float[splineResolution + 1];
-        Vector3[] samples = new Vector3[splineResolution + 1];
-        samples[0] = CircleArc(p0, p1, p2, 0f);
-        arcLengths[0] = 0f;
-
-        for (int i = 1; i <= splineResolution; i++)
-        {
-            samples[i] = CircleArc(p0, p1, p2, i * invRes);
-            arcLengths[i] = arcLengths[i - 1] + Vector3.Distance(samples[i - 1], samples[i]);
-        }
-
-        float totalLength = arcLengths[splineResolution];
-        int maxPoints = Mathf.FloorToInt(totalLength / minDist) + 1;
-
-        // Pass 2: Place equidistant points via binary search on LUT
-        List<Vector3> allPoints = new List<Vector3>(maxPoints);
-        int pivotIndex = 0;
-        float closestDistSq = float.MaxValue;
-
-        for (int n = 0; n < maxPoints; n++)
-        {
-            float targetArc = n * minDist;
-            if (targetArc > totalLength)
-            {
-                break;
-            }
-
-            int lo = 0, hi = splineResolution;
-            while (hi - lo > 1)
-            {
-                int mid = (lo + hi) / 2;
-                if (arcLengths[mid] <= targetArc)
-                {
-                    lo = mid;
-                }
-                else
-                {
-                    hi = mid;
-                }
-            }
-
-            float segLen = arcLengths[hi] - arcLengths[lo];
-            float frac = segLen > 0f ? (targetArc - arcLengths[lo]) / segLen : 0f;
-            Vector3 point = Vector3.Lerp(samples[lo], samples[hi], frac);
-            allPoints.Add(point);
-
-            float distSq = (point - pivotTarget).sqrMagnitude;
-            if (distSq < closestDistSq)
-            {
-                closestDistSq = distSq;
-                pivotIndex = allPoints.Count - 1;
-            }
-        }
-
-        int beforePivot = split - 1;
-        int startIndex = pivotIndex - beforePivot;
-        int endIndex = startIndex + fbCount - 1;
-
-        if (startIndex < 0)
-        {
-            startIndex = 0;
-        }
-        if (endIndex >= allPoints.Count)
-        {
-            endIndex = allPoints.Count - 1;
-            startIndex = Mathf.Max(0, endIndex - fbCount + 1);
-        }
-
-        int actualCount = endIndex - startIndex + 1;
-
-        Pose[] poses = new Pose[actualCount];
-        for (int i = 0; i < actualCount; i++)
-        {
-            int idx = startIndex + i;
-            Vector3 direction;
-            if (idx < allPoints.Count - 1)
-            {
-                direction = allPoints[idx + 1] - allPoints[idx];
-            }
-            else
-            {
-                direction = allPoints[idx] - allPoints[idx - 1];
-            }
-
-            Vector3 euler = Quaternion.LookRotation(direction).eulerAngles;
-            float roll = -(startRollAngle + stepRollAngle * i);
-            poses[i] = new Pose(allPoints[idx], Quaternion.Euler(euler.x, euler.y, roll));
-        }
-
-        return poses;
+        CatmullRom,
+        StraightLine,
+        Bezier,
+        CubicSpline,
+        CircleArc
     }
 
     Pose[] GetCatmullRomSegmentPoints(Vector3[] controlPoints)
@@ -586,75 +283,37 @@ public class CatmullRomSpline : MonoBehaviour
                     }
                     break;
             case SplineMethod.Bezier:
-                Vector3 bp0 = controlPoints[0];
-                Vector3 bp1 = controlPoints[1];
-                Vector3 bp2 = controlPoints[2];
-
-                Pose[] bezierPoses = BezierSectionPoints(bp0, bp1, bp2, controlPoints[1], minDistBetweenPoints, interpolatedStartRollAngle, stepAngle, split, totalPointCount);
-                int bezierCount = bezierPoses?.Length ?? 0;
-
-                Quaternion invRotBezier = Quaternion.Inverse(fbGroup.transform.rotation);
-                result = new Pose[bezierCount];
-                for (int i = 0; i < bezierCount; i++)
-                {
-                    result[i] = new Pose(fbGroup.transform.InverseTransformPoint(bezierPoses[i].position), invRotBezier * bezierPoses[i].rotation);
-                }
-                fbGroup.transform.position = controlPoints[2];
-                break;
-
             case SplineMethod.CubicSpline:
-                Vector3 cs0 = controlPoints[0];
-                Vector3 cs1 = controlPoints[1];
-                Vector3 cs2 = controlPoints[2];
-
-                Pose[] cubicPoses = CubicSplineSectionPoints(cs0, cs1, cs2, controlPoints[1], minDistBetweenPoints, interpolatedStartRollAngle, stepAngle, split, totalPointCount);
-                int cubicCount = cubicPoses?.Length ?? 0;
-
-                Quaternion invRotCubic = Quaternion.Inverse(fbGroup.transform.rotation);
-                result = new Pose[cubicCount];
-                for (int i = 0; i < cubicCount; i++)
-                {
-                    result[i] = new Pose(fbGroup.transform.InverseTransformPoint(cubicPoses[i].position), invRotCubic * cubicPoses[i].rotation);
-                }
-                fbGroup.transform.position = controlPoints[2];
-                break;
-
             case SplineMethod.CircleArc:
-                Vector3 ca0 = controlPoints[0];
-                Vector3 ca1 = controlPoints[1];
-                Vector3 ca2 = controlPoints[2];
-
-                Pose[] arcPoses = CircleArcSectionPoints(ca0, ca1, ca2, controlPoints[1], minDistBetweenPoints, interpolatedStartRollAngle, stepAngle, split, totalPointCount);
-                int arcCount = arcPoses?.Length ?? 0;
-
-                Quaternion invRotArc = Quaternion.Inverse(fbGroup.transform.rotation);
-                result = new Pose[arcCount];
-                for (int i = 0; i < arcCount; i++)
-                {
-                    result[i] = new Pose(fbGroup.transform.InverseTransformPoint(arcPoses[i].position), invRotArc * arcPoses[i].rotation);
-                }
-                fbGroup.transform.position = controlPoints[2];
-                break;
-
             case SplineMethod.CatmullRom:
             default:
-                var augmentedControlPoints = AugmentControlPoints(controlPoints[0], controlPoints[1], controlPoints[2]);
-                Pose[] beforeResult = BeforeSectionPoints(augmentedControlPoints, minDistBetweenPoints, interpolatedStartRollAngle, stepAngle, split);
-                Pose[] afterResult = AfterSectionPoints(augmentedControlPoints, minDistBetweenPoints, interpolatedStartRollAngle, stepAngle, split, totalPointCount);
-
-                int beforeCount = beforeResult?.Length ?? 0;
-                int afterCount = afterResult?.Length ?? 0;
-
-                // Convert to local space and combine results
-                Quaternion invRotation = Quaternion.Inverse(fbGroup.transform.rotation);
-                result = new Pose[beforeCount + afterCount];
-                for (int i = 0; i < beforeCount; i++)
+                System.Func<float, Vector3> evaluate;
+                if (splineMethod == SplineMethod.Bezier)
                 {
-                    result[i] = new Pose(fbGroup.transform.InverseTransformPoint(beforeResult[i].position), invRotation * beforeResult[i].rotation);
+                    evaluate = t => QuadBezier(controlPoints[0], controlPoints[1], controlPoints[2], t);
                 }
-                for (int i = 0; i < afterCount; i++)
+                else if (splineMethod == SplineMethod.CubicSpline)
                 {
-                    result[beforeCount + i] = new Pose(fbGroup.transform.InverseTransformPoint(afterResult[i].position), invRotation * afterResult[i].rotation);
+                    evaluate = t => CubicSpline(controlPoints[0], controlPoints[1], controlPoints[2], t);
+                }
+                else if (splineMethod == SplineMethod.CircleArc)
+                {
+                    evaluate = t => CircleArc(controlPoints[0], controlPoints[1], controlPoints[2], t);
+                }
+                else
+                {
+                    var augmentedControlPoints = AugmentControlPoints(controlPoints[0], controlPoints[1], controlPoints[2]);
+                    evaluate = t => CatmullRomFull(augmentedControlPoints, t);
+                }
+
+                Pose[] splinePoses = ArcLengthSectionPoints(evaluate, controlPoints[1], minDistBetweenPoints, interpolatedStartRollAngle, stepAngle, split, totalPointCount);
+                int splineCount = splinePoses?.Length ?? 0;
+
+                Quaternion invRot = Quaternion.Inverse(fbGroup.transform.rotation);
+                result = new Pose[splineCount];
+                for (int i = 0; i < splineCount; i++)
+                {
+                    result[i] = new Pose(fbGroup.transform.InverseTransformPoint(splinePoses[i].position), invRot * splinePoses[i].rotation);
                 }
                 fbGroup.transform.position = controlPoints[2];
                 break;
